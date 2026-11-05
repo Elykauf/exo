@@ -34,6 +34,7 @@ from exo.utils.task_group import TaskGroup
 from .macmon import MacmonMetrics
 from .system_info import (
     get_friendly_name,
+    get_cuda_vram_available,
     get_gpu_working_set,
     get_model_and_chip,
     get_network_interfaces,
@@ -526,10 +527,15 @@ class InfoGatherer:
         )
         while True:
             try:
+                # On a CUDA node a model must fit in VRAM, not system RAM: report free VRAM
+                # so placement caps this node's shard (and weights layer splits) by it.
+                cuda_vram = await to_thread.run_sync(get_cuda_vram_available)
                 await self.info_sender.send(
                     MemoryUsage.from_psutil(
                         override_memory=override_memory,
-                        gpu_working_set=self._gpu_working_set,
+                        gpu_working_set=cuda_vram
+                        if cuda_vram is not None
+                        else self._gpu_working_set,
                     )
                 )
             except Exception as e:

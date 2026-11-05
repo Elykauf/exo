@@ -17,7 +17,8 @@ class MemoryUsage(FrozenModel):
     swap_available: Memory
     # The most memory a Mac's GPU should use (Metal's recommended working set, about 75% of
     # the RAM). macOS keeps the rest for itself, so a model can't use all of a Mac's free
-    # memory. None where it isn't known.
+    # memory. On a CUDA node it is the GPU's free VRAM (less a reserve), since a model must
+    # fit there. None where it isn't known.
     gpu_working_set: Memory | None = None
 
     @classmethod

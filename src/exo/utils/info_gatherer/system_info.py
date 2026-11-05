@@ -1,3 +1,4 @@
+import os
 import platform
 import socket
 import sys
@@ -50,6 +51,45 @@ def get_gpu_working_set() -> Memory | None:
     if not mx.metal.is_available():
         return None
     return Memory.from_bytes(int(mx.device_info()["max_recommended_working_set_size"]))
+
+
+_nvml_ready: bool | None = None
+
+
+def _cuda_device_index() -> int:
+    """The NVML index of the GPU MLX's CUDA backend runs on (its default device, the first
+    one CUDA_VISIBLE_DEVICES exposes). NVML ignores CUDA_VISIBLE_DEVICES, so map it here."""
+    visible = os.getenv("CUDA_VISIBLE_DEVICES", "").split(",")[0].strip()
+    return int(visible) if visible.isdigit() else 0
+
+
+def get_cuda_vram_available() -> Memory | None:
+    """Free VRAM a model can still use on this node's CUDA GPU, less a reserve for the CUDA
+    context, activations and KV cache (EXO_CUDA_VRAM_RESERVE_MB, default 1024).
+
+    Like `ram_available`, it is read every poll, so the memory loaded models hold is already
+    gone from it. None without an NVIDIA GPU (or without nvidia-ml-py)."""
+    global _nvml_ready
+    if sys.platform != "linux" or _nvml_ready is False:
+        return None
+    try:
+        import pynvml as nvml  # pyright: ignore[reportMissingModuleSource]
+    except ImportError:
+        _nvml_ready = False
+        return None
+    try:
+        if _nvml_ready is None:
+            nvml.nvmlInit()
+            _nvml_ready = nvml.nvmlDeviceGetCount() > 0
+            if not _nvml_ready:
+                return None
+        handle = nvml.nvmlDeviceGetHandleByIndex(_cuda_device_index())
+        free = int(nvml.nvmlDeviceGetMemoryInfo(handle).free)
+    except Exception:
+        _nvml_ready = False
+        return None
+    reserve = Memory.from_mb(int(os.getenv("EXO_CUDA_VRAM_RESERVE_MB", "1024"))).in_bytes
+    return Memory.from_bytes(max(0, free - reserve))
 
 
 async def get_friendly_name() -> str:
