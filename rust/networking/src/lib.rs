@@ -30,6 +30,41 @@ pub fn cfg(identity: &str, listen_port: u16) -> Result<zenoh::Config> {
     cfg.insert_json5("id", &format!("\"{identity}\""))?;
     cfg.insert_json5("mode", "\"router\"")?;
     cfg.insert_json5("listen/endpoints", &format!("[\"tcp/[::]:{listen_port}\"]"))?;
+    // Peers to dial directly, for networks multicast discovery can't cross (e.g. Tailscale):
+    // EXO_CONNECT_PEERS=100.83.56.65 or host:port, comma separated; port defaults to ours
+    if let Ok(peers) = std::env::var("EXO_CONNECT_PEERS") {
+        let endpoints: Vec<String> = peers
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(|p| {
+                if p.contains('/') {
+                    p.to_owned()
+                } else if p.parse::<std::net::SocketAddr>().is_ok()
+                    || (p.matches(':').count() == 1 && !p.starts_with('['))
+                {
+                    format!("tcp/{p}")
+                } else if p.contains(':') {
+                    format!("tcp/[{p}]:{listen_port}")
+                } else {
+                    format!("tcp/{p}:{listen_port}")
+                }
+            })
+            .collect();
+        if !endpoints.is_empty() {
+            cfg.insert_json5(
+                "connect/endpoints",
+                &format!(
+                    "[{}]",
+                    endpoints
+                        .iter()
+                        .map(|e| format!("{e:?}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+            )?;
+        }
+    }
     cfg.insert_json5("scouting/multicast/enabled", "false")?;
     cfg.insert_json5("scouting/multicast/autoconnect", "[]")?;
     cfg.insert_json5("scouting/gossip/multihop", "true")?;
